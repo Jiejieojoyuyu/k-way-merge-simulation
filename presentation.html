@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>并行K路外排（三线程/败者树）—交互式可视化 (A11y/Compat 修正版)</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#141d2e; --card:#182235; --muted:#8aa3c2;
+    --acc:#5fb0ff; --good:#27c93f; --bad:#ff3b30; --warn:#ffcc00; --line:#2a3a55;
+    --dot:12px; --dot-gap:4px; --dot-font:9px;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:#e6eef9;
+    font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif;
+    -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;
+    -webkit-user-select:none; user-select:none; touch-action:manipulation;}
+  .root{display:grid;grid-template-columns: 360px 1fr 380px;grid-template-rows:auto 1fr;gap:10px;height:100%;padding:10px;box-sizing:border-box}
+  .title{grid-column:1/4; background:linear-gradient(90deg,#12223a,#0f1a2c);border:1px solid var(--line);padding:10px 14px;border-radius:12px;display:flex;align-items:center;justify-content:space-between}
+  h1{font-size:18px;margin:0;font-weight:600;color:#d9e8ff}
+  .badge{font-size:12px;color:#9ec7ff;background:#0d213b;border:1px solid #1b3556;padding:4px 8px;border-radius:999px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px;overflow:auto}
+  .section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:10px}
+  .section h3{margin:0 0 8px 0;font-size:14px;color:#cfe2ff}
+  .flex{display:flex;gap:10px;align-items:center}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .btn{background:#153558;border:1px solid #1f4b7d;border-radius:10px;color:#ddecff;padding:8px 10px;font-size:13px;cursor:pointer}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.primary{background:#0f4477;border-color:#1560ad}
+  .btn.warn{background:#5b2b0b;border-color:#8a4414}
+  input[type=number]{width:100%;box-sizing:border-box;border-radius:8px;border:1px solid #2b3d5a;background:#0e1727;color:#d8e6ff;padding:6px 8px}
+  input::placeholder{color:#6683a8}
+  .small{font-size:12px;color:#9ab6dc}
+  .kv{display:flex;justify-content:space-between;font-size:12px;border-bottom:1px dashed #2a3a55;padding:4px 0}
+  .kv:last-child{border-bottom:none}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .tag{padding:2px 6px;border-radius:8px;background:#11253e;border:1px solid #23486f;color:#9ec7ff;font-size:12px}
+  .area{border:1px dashed #38507a;border-radius:12px;padding:10px;min-height:90px;background:#0e1626}
+  .lane-row{display:flex;gap:6px;flex-wrap:wrap}
+  .lane{border:1px solid #2b3d5a;border-radius:10px;padding:6px 8px;background:#0c1422;min-width:92px}
+  .lane h4{margin:0 0 6px 0;font-size:12px;color:#a8c3e6}
+  .dots{display:grid;grid-template-columns:repeat(6,var(--dot));gap:var(--dot-gap);justify-content:center}
+  .dot{width:var(--dot);height:var(--dot);border-radius:50%;background:#1b2a44;border:1px solid #2e4975;display:inline-block}
+  .dot.val{background:#0b2340;border-color:#1c3e66;position:relative}
+  .dot.val::after{content:attr(data-v);position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:var(--dot-font);color:#9fd1ff}
+  .capcol{display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 6px;border:1px solid #2b3d5a;border-radius:8px;background:#0f1a2c}
+  .capcol .cap{width:12px;height:12px;border-radius:3px;border:1px solid #2d415f}
+  .cap.ok{background:var(--good)}
+  .cap.busy{background:var(--bad)}
+  .pool{display:flex;gap:6px;flex-wrap:wrap}
+  .thread-title{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .thread-title .square{width:10px;height:10px;border-radius:2px;background:#2c7be5}
+  .thread-title .square.in{background:#27c93f}
+  .thread-title .square.out{background:#ffb020}
+  .thread-title .square.main{background:#5f63ff}
+  .tree{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .tree .lvl{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+  .node{min-width:44px;padding:6px 6px;border-radius:8px;border:1px solid #2b3d5a;background:#0a1424;text-align:center;font-size:12px}
+  .node.leaf{background:#0d1b30}
+  .node.win{border-color:#3d75b3;box-shadow:0 0 0 2px #112e4f inset}
+  .buf{display:flex;gap:10px;align-items:center}
+  .bufbox{display:grid;grid-template-columns:repeat(12,12px);gap:4px;padding:6px;border:1px solid #2b3d5a;border-radius:8px;background:#0f1a2c}
+  .statusline{font-size:12px;display:flex;gap:6px;flex-wrap:wrap}
+  .pill{border:1px solid #2b3d5a;border-radius:999px;padding:2px 6px;background:#0f1a2c}
+  .pill.g{border-color:#214a35;background:#0f271f;color:#8ad7ad}
+  .pill.r{border-color:#6b2d2d;background:#2a1010;color:#ff9b9b}
+  .outlist{font-size:12px;line-height:1.5;min-height:70px;max-height:170px;overflow:auto;background:#0e1626;border:1px solid #2b3d5a;border-radius:8px;padding:6px}
+  .warnline{color:#ffd479}
+  .logbox{min-height:110px;max-height:220px;overflow:auto;background:#0e1626;border:1px solid #2b3d5a;border-radius:8px;padding:8px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.4;color:#ffd479}
+  .logbox p{margin:0 0 6px 0}
+  .pool-label{font-size:11px;color:#9ec7ff;margin-top:4px;text-align:center}
+</style>
+</head>
+<body>
+<div class="root">
+  <div class="title" role="banner">
+    <h1>并行 K 路外排（三线程 / 败者树）—交互式仿真</h1>
+    <div class="badge" id="compatInfo" aria-hidden="true">A11y/Compat OK · 一步一事件 · 自动重置</div>
+  </div>
+
+  <!-- 左：状态监控 -->
+  <aside class="panel" id="statePanel" role="complementary" aria-label="全局与同步状态">
+    <div class="section">
+      <h3>全局状态</h3>
+      <div class="kv"><span>阶段</span><span class="mono" id="phaseName">-</span></div>
+      <div class="kv"><span>时刻 t</span><span class="mono" id="tick">0</span></div>
+      <div class="kv"><span>已输出</span><span class="mono" id="outCount">0</span></div>
+      <div class="kv"><span>目标 N</span><span class="mono" id="targetN">0</span></div>
+      <div class="kv"><span>K / PoolCap</span><span class="mono" id="kPool">-</span></div>
+      <div class="kv"><span>进行中IO</span><span class="mono" id="ioBusy">无</span></div>
+    </div>
+
+    <div class="section">
+      <h3>输入线程 · 同步变量</h3>
+      <div class="small">与工程 in_need[i] / in_done[i] 对齐（逐路）</div>
+      <div id="inSync" class="area" role="region" aria-label="输入同步变量"></div>
+    </div>
+
+    <div class="section">
+      <h3>输出线程 · 同步变量</h3>
+      <div class="kv"><span>out_need</span><span id="out_need" class="tag">false</span></div>
+      <div class="kv"><span>out_done</span><span id="out_done" class="tag">true</span></div>
+      <div class="kv"><span>写IO进度</span><span id="wrProg" class="mono">-</span></div>
+    </div>
+
+    <div class="section">
+      <h3>控制</h3>
+      <div class="flex" role="group" aria-label="播放控制">
+        <button class="btn primary" id="next" type="button" title="前进一步">下一步</button>
+        <button class="btn" id="play" type="button" title="自动播放/暂停">播放</button>
+        <button class="btn warn" id="reset" type="button" title="立即重置">重置</button>
+      </div>
+      <div class="small" style="margin-top:6px">播放时参数改变会<strong>自动暂停并重置</strong>。</div>
+      <div class="small" style="margin-top:10px">播放帧率（步/秒）</div>
+      <div class="flex" style="align-items:center">
+        <input id="rateSlider" type="range" min="1" max="20" step="1" value="3" aria-label="播放帧率"/>
+        <span class="small" id="rateLabel">3 fps</span>
+      </div>
+      <div class="small" style="margin-top:10px">圆点大小（像素）</div>
+      <div class="flex" style="align-items:center">
+        <input id="dotSlider" type="range" min="8" max="28" step="1" value="12" aria-label="圆点大小"/>
+        <span class="small" id="dotLabel">12 px</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 中：三线程区域 -->
+  <main class="panel" id="centerPanel" role="main" aria-label="三线程可视化">
+    <!-- 输入线程 -->
+    <div class="section" aria-label="输入线程">
+      <div class="thread-title"><div class="square in" aria-hidden="true"></div><h3>输入线程（池 + 预取）</h3></div>
+      <div class="statusline" id="inStatus"></div>
+      <div class="area" id="poolArea" aria-label="输入池"></div>
+      <div class="area" aria-label="预备缓冲">
+        <div class="lane-row" id="standbyArea" aria-label="各路预备缓冲"></div>
+      </div>
+    </div>
+
+    <!-- 主线程（败者树） -->
+    <div class="section" aria-label="主线程">
+      <div class="thread-title"><div class="square main" aria-hidden="true"></div><h3>主线程（败者树选择）</h3></div>
+      <div class="statusline" id="mainStatus"></div>
+      <div class="area">
+        <div class="tree" id="treeArea" aria-label="败者树"></div>
+      </div>
+      <div class="area" aria-label="主缓冲">
+        <div class="lane-row" id="activeArea" aria-label="各路主缓冲"></div>
+      </div>
+    </div>
+
+    <!-- 输出线程 -->
+    <div class="section" aria-label="输出线程">
+      <div class="thread-title"><div class="square out" aria-hidden="true"></div><h3>输出线程（活跃/待写 双缓冲）</h3></div>
+      <div class="statusline" id="outStatus"></div>
+      <div class="buf" role="group" aria-label="输出缓冲">
+        <div><div class="small">活跃输出缓冲</div><div class="bufbox" id="obufActive" aria-label="活跃输出"></div></div>
+        <div><div class="small">待写缓冲</div><div class="bufbox" id="obufWrite" aria-label="待写缓冲"></div></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 右：参数与最终输出 -->
+  <aside class="panel" role="complementary" aria-label="参数设置与最终输出">
+    <form class="section" id="paramForm" aria-label="参数设置" autocomplete="off" novalidate>
+      <h3>参数（改动即自动重置）</h3>
+      <div class="grid2" role="group" aria-label="基本参数">
+        <label class="small" for="p_k">k（路数）</label>
+        <input id="p_k" name="k" type="number" min="2" max="32" step="1" value="7"
+               aria-label="路数" title="路数K" placeholder="例如 7" required/>
+        <label class="small" for="p_block">块大小（元素）</label>
+        <input id="p_block" name="block" type="number" min="1" max="12" step="1" value="3"
+               aria-label="块大小" title="每块包含的元素个数" placeholder="例如 3" required/>
+        <label class="small" for="p_pool">池容量（块）</label>
+        <input id="p_pool" name="pool" type="number" min="1" max="24" step="1" value="6"
+               aria-label="池容量" title="输入池可存放的块数" placeholder="例如 6" required/>
+        <label class="small" for="p_iosteps">IO步数/块</label>
+        <input id="p_iosteps" name="iosteps" type="number" min="1" max="12" step="1" value="4"
+               aria-label="每块IO的步数" title="读/写一个块所需的步数" placeholder="例如 4" required/>
+      </div>
+      <div class="grid2" style="margin-top:8px" role="group" aria-label="数据规模与速度">
+        <label class="small" for="p_total">总元素 N</label>
+        <input id="p_total" name="total" type="number" min="7" max="999999" step="1" value="70"
+               aria-label="总元素数" title="总生成元素数量" placeholder="例如 70" required/>
+        <label class="small" for="p_min">随机最小值</label>
+        <input id="p_min" name="min" type="number" value="0"
+               aria-label="随机最小值" title="生成数据的最小随机值" placeholder="例如 0" required/>
+        <label class="small" for="p_max">随机最大值</label>
+        <input id="p_max" name="max" type="number" value="999"
+               aria-label="随机最大值" title="生成数据的最大随机值" placeholder="例如 999" required/>
+        <label class="small" for="p_seed">随机种子</label>
+        <input id="p_seed" name="seed" type="number" step="1" value="12345"
+               aria-label="随机种子" title="固定随机数生成的种子" placeholder="例如 12345" required/>
+        <label class="small" for="p_speed">播放间隔(ms)</label>
+        <input id="p_speed" name="speed" type="number" min="50" step="50" value="350"
+               aria-label="播放速度" title="自动播放的步间隔(毫秒)" placeholder="例如 350" required/>
+      </div>
+    </form>
+
+    <div class="section" aria-live="polite">
+      <h3>最终输出</h3>
+      <div class="kv"><span>已输出</span><span class="mono" id="finalCount">0</span></div>
+      <div class="kv"><span>目标</span><span class="mono" id="finalTarget">0</span></div>
+      <div class="outlist mono" id="finalList" aria-label="输出序列"></div>
+    </div>
+    <div class="section">
+      <h3>事件日志</h3>
+      <div class="logbox" id="eventLog" aria-label="事件日志" role="log"></div>
+    </div>
+  </aside>
+</div>
+
+<script>
+(()=>{
+// ========= 工具 =========
+const $=sel=>document.querySelector(sel);
+const CE=(tag,cls)=>{const el=document.createElement(tag); if(cls) el.className=cls; return el;}
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const createPRNG=(seed)=>{
+  let s = (seed>>>0)||1;
+  return ()=>{ s = (s * 1664525 + 1013904223)>>>0; return (s>>>0)/4294967296; };
+};
+
+// ========= 败者树 =========
+class KLoserTree{
+  constructor(k, cmp){ this.K=k|0; this.cmp=cmp||((a,b)=>a<b);
+    this.size=1; while(this.size<this.K) this.size<<=1;
+    this.losers=new Array(this.size*2).fill(-1);
+    this.keys=new Array(this.K).fill(null);
+    this.valid=new Array(this.K).fill(false);
+    this.win=-1;
+  }
+  setLeaf(i,v,ok){ if(i<0||i>=this.K) return; this.keys[i]=v; this.valid[i]=!!ok; }
+  settle(a,b){
+    if(a<0) return b; if(b<0) return a;
+    const ka=this.keys[a], kb=this.keys[b];
+    if(this.cmp(ka,kb)) return a;
+    if(this.cmp(kb,ka)) return b;
+    return a<b?a:b;
+  }
+  build(){
+    for(let i=0;i<this.size;i++){
+      const idx=(i<this.K && this.valid[i])?i:-1;
+      this.losers[this.size+i]=idx;
+    }
+    for(let p=this.size-1;p>0;--p){
+      const l=this.losers[p<<1], r=this.losers[(p<<1)|1];
+      this.losers[p]=this.settle(l,r);
+    }
+    this.win=this.losers[1];
+  }
+  update(i,v,ok){
+    if(i<0||i>=this.K) return;
+    this.keys[i]=v; this.valid[i]=!!ok;
+    let pos=this.size+i;
+    this.losers[pos]=ok?i:-1;
+    while(pos>1){
+      pos>>=1;
+      const l=this.losers[pos<<1], r=this.losers[(pos<<1)|1];
+      this.losers[pos]=this.settle(l,r);
+    }
+    this.win=this.losers[1];
+  }
+  winner(){ return this.win; }
+}
+
+// ========= 仿真 =========
+class Simulation{
+  constructor(){
+    this.timer=null;
+    this.resetFromUI();
+    this.attach();
+    this.renderAll();
+  }
+
+  // ---- 参数 ----
+  get cfg(){
+    const k = clamp(parseInt($("#p_k").value||7,10),2,32);
+    return {
+      k,
+      block: clamp(parseInt($("#p_block").value||3,10),1,12),
+      poolCap: clamp(parseInt($("#p_pool").value||6,10),1,24),
+      ioSteps: clamp(parseInt($("#p_iosteps").value||4,10),1,12),
+      total: clamp(parseInt($("#p_total").value||70,10),k,999999),
+      minV: parseInt($("#p_min").value||0,10),
+      maxV: parseInt($("#p_max").value||999,10),
+      speed: clamp(parseInt($("#p_speed").value||350,10),50,5000),
+      seed: parseInt($("#p_seed").value||12345,10)||0,
+    };
+  }
+
+  // ---- 初始化/重置 ----
+  resetFromUI(){
+    const C=this.cfg;
+    this.random=createPRNG(C.seed||1);
+
+    // 生成各路有序数据，总N平均分配
+    const base=Math.floor(C.total/C.k), rem=C.total-C.k*base;
+    this.lanes = Array.from({length:C.k}, (_,i)=>{
+      const len = base + (i<rem?1:0);
+      const arr = Array.from({length:len}, ()=>this.randInt(C.minV,C.maxV)).sort((a,b)=>a-b);
+      const blocks=[];
+      for(let p=0;p<arr.length; p+=C.block) blocks.push(arr.slice(p,Math.min(arr.length,p+C.block)));
+      return {
+        id:i,
+        disk: blocks.slice(1),      // 其余块在“磁盘”
+        firstBlock: blocks[0]||null,// 首块（初始化阶段要读）
+        active: null,
+        standby: null,
+        idx:0,
+        head:null
+      };
+    });
+
+    // 输入池：最多 poolCap 块；读IO占位单独标识
+    this.pool=[];                  // [{lane, data:[...] }]
+    this.poolBusy=null;            // {lane, steps, finishFirstBlock?}
+    // 输出
+    this.outAct=[];
+    this.outWrite=[];
+    this.outBusy=null;             // {steps}
+    this.output=[];
+
+    // 同步变量
+    this.in_need = this.lanes.map(()=>false);
+    this.in_done = this.lanes.map(()=>false);
+    this.out_need=false; this.out_done=true;
+
+    // 败者树
+    this.treeBuilt=false;
+    this.klt=new KLoserTree(this.lanes.length,(a,b)=>a<b);
+
+    // 调度/阶段
+    this.tick=0;
+    this.phase="初始化：为每一路准备首块（读IO→池→路），再构建败者树";
+    this.finished=false;
+
+    // 初始化目标&统计
+    $("#targetN").textContent=C.total;
+    $("#finalTarget").textContent=C.total;
+    $("#finalCount").textContent="0";
+    $("#finalList").textContent="";
+    $("#kPool").textContent=`K=${C.k} / PoolCap=${C.poolCap}`;
+    this.log=[];
+    this.stepLogs=[];
+
+    // 初始化计划：尚需首块的路集合
+    this.initNeed = new Set(this.lanes.map((_,i)=>i));
+  }
+
+  // ---- 绑定 ----
+  attach(){
+    $("#next").onclick=()=>this.step();
+    $("#play").onclick=()=>{ this.timer? this.stopPlay() : this.startPlay(); };
+    $("#reset").onclick=()=>{ this.stopPlay(); this.resetFromUI(); this.renderAll(); };
+
+    // 任何参数变化 -> 自动重置
+    ["#p_k","#p_block","#p_pool","#p_iosteps","#p_total","#p_min","#p_max","#p_speed"]
+      .forEach(s=>$(s).addEventListener("input", ()=>{
+        // 简单表单校验：最小值<=最大值
+        const minV=parseInt($("#p_min").value||0), maxV=parseInt($("#p_max").value||0);
+        if(minV>maxV){ $("#p_max").value=minV; }
+        this.stopPlay(); this.resetFromUI(); this.renderAll();
+      }));
+
+    const rateSlider=$("#rateSlider");
+    if(rateSlider){
+      rateSlider.addEventListener("input", ()=>{
+        const fps=clamp(parseInt(rateSlider.value||1,10),1,20);
+        const ms=clamp(Math.round(1000/fps),50,5000);
+        $("#p_speed").value=ms;
+        $("#rateLabel").textContent=`${fps} fps`;
+        this.stopPlay(); this.resetFromUI(); this.renderAll();
+      });
+    }
+
+    const dotSlider=$("#dotSlider");
+    if(dotSlider){
+      dotSlider.addEventListener("input", ()=>{
+        const size=clamp(parseInt(dotSlider.value||12,10),8,28);
+        this.applyDotSize(size);
+      });
+      this.applyDotSize(clamp(parseInt(dotSlider.value||12,10),8,28));
+    }
+  }
+
+  addLog(msg){
+    if(!msg) return;
+    const stamp=String(this.tick).padStart(3,"0");
+    this.log.unshift(`[t=${stamp}] ${msg}`);
+    if(this.log.length>200) this.log.length=200;
+  }
+
+  logStep(msg){
+    if(!msg) return;
+    if(!this.stepLogs) this.stepLogs=[];
+    this.stepLogs.push(msg);
+  }
+
+  laneRemaining(lane){
+    const activeLeft = lane.active ? Math.max(0,lane.active.length - lane.idx) : 0;
+    const standbyLeft = lane.standby ? lane.standby.length : 0;
+    return activeLeft + standbyLeft;
+  }
+
+  laneTailPriority(lane){
+    if(!lane.active || lane.active.length===0){
+      return Number.NEGATIVE_INFINITY;
+    }
+    const activeMax=lane.active[lane.active.length-1];
+    if(lane.standby && lane.standby.length>0){
+      const standbyMax=lane.standby[lane.standby.length-1];
+      return Math.max(activeMax, standbyMax);
+    }
+    return activeMax;
+  }
+
+  laneNeedsActive(lane){
+    return !lane.active || lane.idx>=(lane.active?lane.active.length:0);
+  }
+
+  laneHasSupply(lane){
+    return !!(lane.standby || lane.disk.length>0 || this.hasPoolBlock(lane.id) || this.laneHasPendingRead(lane));
+  }
+
+  randInt(a,b){
+    if(!this.random) this.random=createPRNG(Date.now());
+    return a+Math.floor(this.random()*(b-a+1));
+  }
+
+  hasPoolBlock(id){
+    return this.pool.some(p=>p.lane===id);
+  }
+
+  loadActive(lane, block){
+    if(!lane) return;
+    if(!block || block.length===0){
+      this.markLaneEmpty(lane);
+      return;
+    }
+    lane.active=block.slice();
+    lane.idx=0;
+    lane.head=lane.active[0]??null;
+    this.in_need[lane.id]=false;
+    this.in_done[lane.id]=true;
+    if(this.treeBuilt){
+      this.klt.update(lane.id, lane.head, lane.head!=null);
+    }
+  }
+
+  loadStandby(lane, block){
+    if(!lane) return;
+    if(!block || block.length===0) return;
+    lane.standby=block.slice();
+    this.in_need[lane.id]=false;
+    this.in_done[lane.id]=true;
+  }
+
+  promoteStandby(lane){
+    if(!lane || !lane.standby) return false;
+    lane.active=lane.standby;
+    lane.standby=null;
+    lane.idx=0;
+    lane.head=lane.active[0]??null;
+    const expectMore = lane.disk.length>0;
+    const pendingPool = this.hasPoolBlock(lane.id);
+    const pendingRead = this.laneHasPendingRead(lane);
+    this.in_need[lane.id] = !lane.standby && expectMore && !pendingPool && !pendingRead;
+    this.in_done[lane.id]=false;
+    if(this.treeBuilt){
+      this.klt.update(lane.id, lane.head, lane.head!=null);
+    }
+    return true;
+  }
+
+  markLaneEmpty(lane){
+    if(!lane) return;
+    lane.active=null;
+    lane.idx=0;
+    lane.head=null;
+    const waiting = !lane.standby && (lane.disk.length>0 || this.hasPoolBlock(lane.id) || (this.poolBusy && this.poolBusy.lane===lane.id));
+    this.in_done[lane.id]=false;
+    this.in_need[lane.id]=waiting;
+    if(this.treeBuilt){
+      this.klt.update(lane.id,null,false);
+    }
+  }
+
+  applyDotSize(size){
+    const root=document.documentElement;
+    root.style.setProperty("--dot", `${size}px`);
+    root.style.setProperty("--dot-gap", `${Math.max(2, Math.round(size/3))}px`);
+    root.style.setProperty("--dot-font", `${Math.max(8, Math.round(size*0.75))}px`);
+    const label=$("#dotLabel"); if(label) label.textContent=`${size} px`;
+    const slider=$("#dotSlider"); if(slider && parseInt(slider.value,10)!==size) slider.value=String(size);
+  }
+
+  syncDotSize(){
+    const slider=$("#dotSlider");
+    if(!slider) return;
+    const size=clamp(parseInt(slider.value||12,10),8,28);
+    this.applyDotSize(size);
+  }
+
+  laneHasPendingRead(lane){
+    return this.poolBusy && this.poolBusy.lane===lane.id;
+  }
+
+  chooseLaneForPoolTransfer(){
+    let best=null;
+    let bestRem=Infinity;
+    for(const lane of this.lanes){
+      if(lane.standby) continue;
+      if(!this.hasPoolBlock(lane.id)) continue;
+      const rem=this.laneRemaining(lane);
+      if(!best || rem<bestRem || (rem===bestRem && lane.id<best.id)){
+        best=lane;
+        bestRem=rem;
+      }
+    }
+    return best;
+  }
+
+  chooseLaneForRead(){
+    let best=null;
+    let bestScore=Infinity;
+    for(const lane of this.lanes){
+      if(lane.disk.length===0) continue;
+      if(this.hasPoolBlock(lane.id)) continue;
+      if(this.laneHasPendingRead(lane)) continue;
+      const score=this.laneTailPriority(lane);
+      if(!best || score<bestScore || (score===bestScore && lane.id<best.id)){
+        best=lane;
+        bestScore=score;
+      }
+    }
+    return best;
+  }
+
+  startPlay(){ $("#play").textContent="暂停"; this.timer=setInterval(()=>this.step(), this.cfg.speed); }
+  stopPlay(){ if(this.timer){ clearInterval(this.timer); this.timer=null; } $("#play").textContent="播放"; }
+
+  // ---- 单步（严格“一步一事件”）----
+  step(){
+    if(this.finished) return;
+    const C=this.cfg;
+    this.stepLogs=[];
+
+    // 0) 写IO推进（若在写）
+    if(this.outBusy){
+      this.outBusy.steps++;
+      if(this.outBusy.steps>=C.ioSteps){
+        this.outBusy=null; this.out_done=true; this.out_need=false; this.outWrite=[];
+        this.logStep("输出：写IO完成");
+      }else{
+        this.logStep("输出：写IO推进");
+      }
+    }
+
+    // 1) 读IO推进（若在读）
+    if(this.poolBusy){
+      this.poolBusy.steps++;
+      if(this.poolBusy.steps>=C.ioSteps){
+        const ln=this.lanes[this.poolBusy.lane];
+        // 首块读完：使用 finishFirstBlock；否则从 disk 取
+        let blk=null;
+        if(this.poolBusy.finishFirstBlock){
+          blk=this.poolBusy.finishFirstBlock.slice();
+        }else{
+          blk = ln.disk.shift()||null;
+        }
+        if(blk){
+          if(this.pool.length < C.poolCap){
+            this.pool.push({lane:ln.id, data:blk});
+          }else{
+            this.logStep(`输入：读IO完成但池已满（路 ${ln.id}）`);
+          }
+        }
+        this.poolBusy=null;
+        this.in_done[ln.id]=true;
+        this.logStep(`输入：读IO完成（路 ${ln.id}）`);
+      }else{
+        this.logStep(`输入：读IO推进（路 ${this.poolBusy.lane}）`);
+      }
+    }
+
+    // 2) 初始化：先把每一路的首块准备好（池→路或启动读）
+    if(!this.treeBuilt){
+      // 2a 池→路交换（优先）
+      for(const li of this.initNeed){
+        const pos=this.pool.findIndex(x=>x.lane===li);
+        if(pos>=0){
+          const got=this.pool.splice(pos,1)[0];
+          const lane=this.lanes[li];
+          this.loadActive(lane, got.data);
+          this.initNeed.delete(li);
+          this.logStep(`初始化：池→路 交换（路 ${li}）`);
+          return this.afterStep();
+        }
+      }
+      // 2b 启动读IO（池未满时，每步只为一个需要的路读一块）
+      if(this.initNeed.size>0 && !this.poolBusy && this.pool.length < C.poolCap){
+        const li=[...this.initNeed][0];
+        const lane=this.lanes[li];
+        if(lane.firstBlock){
+          this.in_need[li]=true; this.in_done[li]=false;
+          this.poolBusy={lane:li,steps:0,finishFirstBlock:lane.firstBlock.slice()};
+          lane.firstBlock=null;
+          this.logStep(`初始化：读IO启动（路 ${li} 首块）`);
+          return this.afterStep();
+        }else if(lane.disk.length>0){
+          this.in_need[li]=true; this.in_done[li]=false;
+          this.poolBusy={lane:li,steps:0};
+          this.logStep(`初始化：读IO启动（路 ${li}）`);
+          return this.afterStep();
+        }else{
+          // 该路本就无数据
+          this.initNeed.delete(li);
+          this.logStep(`初始化：路 ${li} 无数据`);
+          return this.afterStep();
+        }
+      }
+      // 2c 所有路都就绪 → 构建败者树（单独一步）
+      if(this.initNeed.size===0){
+        for(const lane of this.lanes){
+          if(lane.active && lane.active.length>0){
+            lane.head=lane.active[lane.idx];
+            this.klt.setLeaf(lane.id, lane.head, true);
+          }else{
+            this.klt.setLeaf(lane.id, null, false);
+          }
+          this.in_need[lane.id] = lane.disk.length>0;
+        }
+        this.klt.build(); this.treeBuilt=true; this.phase="合并：败者树选择 / 按需预取";
+        this.logStep("主线程：构建败者树");
+        return this.afterStep();
+      }
+      // 否则：池满且无法交换的瞬间，等待下一步（很快会被打破）
+      this.logStep("初始化：等待资源");
+      return this.afterStep();
+    }
+
+    // 3) 合并阶段 —— 按优先级驱动输入/输出事件
+    let progressed=false;
+
+    // 3a 活跃→待写交换（满了才换；换完下一步再启动写IO）
+    if(this.outAct.length>=C.block && this.out_done){
+      this.outWrite=this.outAct.slice(); this.outAct=[]; this.out_need=true; this.out_done=false;
+      this.logStep("输出：活跃→待写 交换");
+      progressed=true;
+    }
+
+    // 3b 池→预备缓冲（如果池中已有该路块且预备为空）
+    const poolLane=this.chooseLaneForPoolTransfer();
+    if(poolLane){
+      const pos=this.pool.findIndex(x=>x.lane===poolLane.id);
+      if(pos>=0){
+        const got=this.pool.splice(pos,1)[0];
+        this.loadStandby(poolLane, got.data);
+        this.logStep(`输入：池→预备缓冲（路 ${poolLane.id}）`);
+        progressed=true;
+      }
+    }
+
+    // 3c 启动读IO（依据剩余元素数优先）
+    if(!this.poolBusy && this.pool.length < C.poolCap){
+      const targetLane=this.chooseLaneForRead();
+      if(targetLane){
+        const lid=targetLane.id;
+        this.in_need[lid]=true; this.in_done[lid]=false;
+        this.poolBusy={lane:lid,steps:0};
+        this.logStep(`输入：读IO启动（路 ${lid}）`);
+        progressed=true;
+      }
+    }
+
+    // 3d 待写非空而未写 → 启动写IO
+    if(this.outWrite.length>0 && !this.outBusy){
+      this.outBusy={steps:0};
+      this.logStep("输出：写IO启动");
+      progressed=true;
+    }
+
+    // 3f 主线程：确保所有运行的主缓冲就绪
+    const refillLane=this.lanes.find(l=>this.laneNeedsActive(l) && this.laneHasSupply(l));
+    if(refillLane){
+      if(refillLane.standby){
+        this.promoteStandby(refillLane);
+        this.logStep(`主线程：预备→主缓冲（路 ${refillLane.id}）`);
+      }else{
+        this.logStep(`主线程：等待预备缓冲（路 ${refillLane.id}）`);
+      }
+      return this.afterStep();
+    }
+
+    // 4) 如果没有赢家（树无有效叶子）→ 处理尾块或结束
+    if(this.klt.winner()<0){
+      if(this.outAct.length>0 && this.out_done){
+        this.outWrite=this.outAct.slice(); this.outAct=[]; this.out_need=true; this.out_done=false;
+        this.logStep("输出：尾块 交换到待写");
+        progressed=true;
+      }
+      if(this.outWrite.length>0 && !this.outBusy){
+        this.outBusy={steps:0};
+        this.logStep("输出：尾块 写IO启动");
+        progressed=true;
+      }
+      if(!progressed){
+        this.phase="完成"; this.finished=true;
+        this.logStep("结束");
+      }
+      return this.afterStep();
+    }
+
+    // 5) 正常产出一步（败者树产 1 元素）
+    if(this.outAct.length>=C.block){
+      this.logStep("主线程：等待输出缓冲腾出空间");
+      return this.afterStep();
+    }
+    const wi=this.klt.winner(); const lane=this.lanes[wi]; const val=lane.head;
+    this.outAct.push(val); this.output.push(val);
+    lane.idx++;
+    let ok=false;
+    if(lane.active && lane.idx<lane.active.length){
+      lane.head=lane.active[lane.idx];
+      ok=true;
+    }else{
+      this.markLaneEmpty(lane);
+    }
+    this.klt.update(wi, lane.head, ok);
+    this.logStep(`主线程：产出 1 个元素（来自路 ${wi}）`);
+    return this.afterStep();
+  }
+
+  afterStep(){
+    this.tick++;
+    const logs = (this.stepLogs && this.stepLogs.length>0)? this.stepLogs : ["等待"];
+    for(let i=logs.length-1;i>=0;--i){
+      this.addLog(logs[i]);
+    }
+    const last = logs[logs.length-1];
+    this.stepLogs=[];
+    this.renderAll(last);
+  }
+
+  // ---- 渲染 ----
+  renderAll(info){
+    const C=this.cfg;
+    $("#tick").textContent=this.tick;
+    $("#phaseName").textContent=this.phase;
+    $("#outCount").textContent=this.output.length;
+    $("#finalCount").textContent=this.output.length;
+    $("#kPool").textContent=`K=${C.k} / PoolCap=${C.poolCap}`;
+    $("#ioBusy").textContent = this.outBusy?"写IO" : (this.poolBusy?"读IO":"无");
+    this.syncFpsDisplay();
+    this.syncDotSize();
+
+    this.renderInSync();
+    this.renderPool();
+    this.renderInputBuffers();
+    this.renderActiveBuffers();
+    this.renderTree();
+    this.renderOutput();
+    this.renderStatusBars();
+    this.renderLog();
+    // 右侧输出列表（只展示前 120 个）
+    const L=$("#finalList"); const show=120;
+    const head=this.output.slice(0,Math.min(show,this.output.length));
+    L.textContent = head.join(" ") + (this.output.length>show?" ...":"");
+  }
+
+  renderInSync(){
+    const box=$("#inSync"); box.innerHTML="";
+    const row=CE("div","lane-row");
+    this.lanes.forEach((_,i)=>{
+      const p=CE("div","lane");
+      const h=CE("h4"); h.textContent=`路 ${i}`; p.appendChild(h);
+      const kv1=CE("div","kv"); kv1.innerHTML=`<span>in_need</span><span class="tag">${this.in_need[i]?"true":"false"}</span>`;
+      const kv2=CE("div","kv"); kv2.innerHTML=`<span>in_done</span><span class="tag">${this.in_done[i]?"true":"false"}</span>`;
+      p.append(kv1,kv2);
+      row.appendChild(p);
+    });
+    box.appendChild(row);
+    $("#out_need").textContent=this.out_need?"true":"false";
+    $("#out_done").textContent=this.out_done?"true":"false";
+    $("#wrProg").textContent=this.outBusy?`${this.outBusy.steps}/${this.cfg.ioSteps}`:"-";
+  }
+
+  renderPool(){
+    const C=this.cfg; const a=$("#poolArea"); a.innerHTML="";
+    const poolWrap=CE("div","pool");
+    const slots=C.poolCap;
+    for(let i=0;i<slots;i++){
+      const col=CE("div","capcol");
+      const cap=CE("div","cap");
+      const blk = this.pool[i];
+      if(blk) cap.classList.add("ok");
+      col.appendChild(cap);
+      const dots=CE("div","dots");
+      if(blk){
+        for(let j=0;j<C.block;j++){
+          const d=CE("div","dot val");
+          d.setAttribute("data-v", blk.data[j]!==undefined?String(blk.data[j]):"");
+          dots.appendChild(d);
+        }
+      }else{
+        for(let j=0;j<C.block;j++) dots.appendChild(CE("div","dot"));
+      }
+      col.appendChild(dots);
+      const label=CE("div","pool-label");
+      label.textContent = blk?`L${blk.lane}`:"-";
+      col.appendChild(label);
+      poolWrap.appendChild(col);
+    }
+    if(this.poolBusy){
+      const col=CE("div","capcol");
+      const cap=CE("div","cap busy");
+      col.appendChild(cap);
+      const dots=CE("div","dots");
+      for(let j=0;j<C.block;j++) dots.appendChild(CE("div","dot"));
+      col.appendChild(dots);
+      const label=CE("div","pool-label");
+      label.textContent=`读 L${this.poolBusy.lane} (${this.poolBusy.steps}/${C.ioSteps})`;
+      col.appendChild(label);
+      poolWrap.appendChild(col);
+    }
+    a.appendChild(poolWrap);
+  }
+
+  renderInputBuffers(){
+    const C=this.cfg; const host=$("#standbyArea"); if(!host) return; host.innerHTML="";
+    this.lanes.forEach((ln)=>{
+      const card=CE("div","lane");
+      const h=CE("h4"); h.textContent=`路 ${ln.id}`; card.appendChild(h);
+      const standbyLabel=CE("div","small"); standbyLabel.textContent="预备缓冲";
+      card.appendChild(standbyLabel);
+      const standbyDots=CE("div","dots");
+      if(ln.standby){
+        for(let j=0;j<C.block;j++){
+          const d=CE("div","dot val");
+          const v = ln.standby[j]!==undefined?String(ln.standby[j]):"";
+          d.setAttribute("data-v", v);
+          standbyDots.appendChild(d);
+        }
+      }else{
+        for(let j=0;j<C.block;j++) standbyDots.appendChild(CE("div","dot"));
+      }
+      card.appendChild(standbyDots);
+      const meta=CE("div","small");
+      const reading=this.laneHasPendingRead(ln)?"读IO中":"闲";
+      meta.textContent = `备余=${ln.standby?ln.standby.length:0} · 磁盘块=${ln.disk.length} · ${reading}`;
+      card.appendChild(meta);
+      host.appendChild(card);
+    });
+  }
+
+  renderActiveBuffers(){
+    const C=this.cfg; const host=$("#activeArea"); if(!host) return; host.innerHTML="";
+    this.lanes.forEach((ln)=>{
+      const card=CE("div","lane");
+      const h=CE("h4"); h.textContent=`路 ${ln.id}`; card.appendChild(h);
+      const activeDots=CE("div","dots");
+      const activeLen = ln.active? ln.active.length : 0;
+      for(let j=0;j<C.block;j++){
+        const d=CE("div","dot val");
+        const consumed = ln.active && j<ln.idx;
+        const hasValue = ln.active && j<activeLen;
+        const v = (!consumed && hasValue && ln.active[j]!==undefined)?String(ln.active[j]):"";
+        d.setAttribute("data-v", v);
+        if(hasValue && j===ln.idx) d.style.boxShadow="0 0 0 2px #3b6fb3 inset";
+        activeDots.appendChild(d);
+      }
+      card.appendChild(activeDots);
+      const meta=CE("div","small");
+      const remain = ln.active ? Math.max(0, ln.active.length - ln.idx) : 0;
+      meta.textContent = `主余=${remain} · idx=${ln.idx}`;
+      card.appendChild(meta);
+      host.appendChild(card);
+    });
+  }
+
+  renderTree(){
+    const host=$("#treeArea"); host.innerHTML="";
+    const k=this.lanes.length;
+    const leafLvl=CE("div","lvl");
+    for(let i=0;i<k;i++){
+      const n=CE("div","node leaf");
+      const ln=this.lanes[i];
+      n.textContent = (ln && ln.head!=null)? String(ln.head): "∅";
+      if(this.klt.winner()===i) n.classList.add("win");
+      leafLvl.appendChild(n);
+    }
+    host.appendChild(leafLvl);
+    const top=CE("div","lvl");
+    const root=CE("div","node");
+    const wi=this.klt.winner();
+    root.textContent = wi>=0? `W:${this.lanes[wi].head}`:"W:∅";
+    top.appendChild(root); host.appendChild(top);
+  }
+
+  renderOutput(){
+    const C=this.cfg;
+    const a=$("#obufActive"); a.innerHTML="";
+    for(let i=0;i<C.block;i++){
+      const d=CE("div","dot val"); const v=this.outAct[i]!==undefined?String(this.outAct[i]):""; d.setAttribute("data-v",v); a.appendChild(d);
+    }
+    const w=$("#obufWrite"); w.innerHTML="";
+    for(let i=0;i<C.block;i++){
+      const d=CE("div","dot val"); const v=this.outWrite[i]!==undefined?String(this.outWrite[i]):""; d.setAttribute("data-v",v); w.appendChild(d);
+    }
+  }
+
+  renderStatusBars(){
+    const s=$("#inStatus"); s.innerHTML="";
+    const ioTag = this.poolBusy? " + IO" : "";
+    const a=CE("span","pill"); a.textContent=`池占用: ${this.pool.length}/${this.cfg.poolCap}${ioTag}`;
+    const b=CE("span","pill"); b.textContent=`读IO: ${this.poolBusy? this.poolBusy.steps+"/"+this.cfg.ioSteps : "无"}`;
+    s.append(a,b);
+
+    const m=$("#mainStatus"); m.innerHTML="";
+    const c=CE("span","pill"); c.textContent=`赢家: ${this.klt.winner()>=0? this.klt.winner():"∅"}`;
+    const d=CE("span","pill"); d.textContent=`树已建: ${this.treeBuilt}`;
+    m.append(c,d);
+
+    const o=$("#outStatus"); o.innerHTML="";
+    const e=CE("span","pill"); e.textContent=`待写: ${this.outWrite.length}`;
+    const f=CE("span","pill"); f.textContent=`写IO: ${this.outBusy? this.outBusy.steps+"/"+this.cfg.ioSteps : "无"}`;
+    o.append(e,f);
+  }
+
+  renderLog(){
+    const box=$("#eventLog");
+    if(!box) return;
+    box.innerHTML="";
+    if(this.log.length===0){
+      const empty=CE("p");
+      empty.textContent="(暂无事件)";
+      box.appendChild(empty);
+      return;
+    }
+    this.log.forEach(entry=>{
+      const p=CE("p");
+      p.textContent=entry;
+      box.appendChild(p);
+    });
+  }
+
+  syncFpsDisplay(){
+    const slider=$("#rateSlider"), label=$("#rateLabel");
+    if(!slider || !label) return;
+    const fpsRaw = Math.round(1000/this.cfg.speed);
+    const min=parseInt(slider.min||"1",10), max=parseInt(slider.max||"20",10);
+    const fps=clamp(fpsRaw,min,max);
+    slider.value=String(fps);
+    label.textContent=`${fps} fps`;
+  }
+}
+
+// ---- 单例启动 ----
+function boot(){ if(window.KMergeApp){ /* 覆盖旧实例 */ } window.KMergeApp=new Simulation(); }
+document.addEventListener("DOMContentLoaded", boot);
+})();
+</script>
+</body>
+</html>
